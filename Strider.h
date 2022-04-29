@@ -84,8 +84,6 @@ namespace strider {
 #define IS_64BIT 0
 #endif
 
-#include <intrin.h>
-
 #if defined(_MSC_VER)
 #if defined(_M_AMD64)
 #include <intrin.h>
