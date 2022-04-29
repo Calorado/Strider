@@ -35,8 +35,8 @@ namespace strider {
 	//window determines the maximum backwards distance the matches can have, as a power of 2.
 	//Larger values can improve compression, but use more memory.
 	//Returns the size of the compressed stream or -1 on failure.
-	size_t strider_compress(const uint8_t* input, const size_t size, uint8_t* output, const int level = 6,
-		const int window = 26, ProgressCallback* progress = nullptr);
+	size_t strider_compress(const uint8_t* input, const size_t size, uint8_t* output, int level = 6,
+		int window = 26, ProgressCallback* progress = nullptr);
 	//Decompresses contents in "compressed" to "decompressed".
 	//You may also pass a pointer to an object with base class ProgressCallback, to track progress.
 	//Returns 0 on success or -1 on failure or corrupted data.
@@ -47,7 +47,7 @@ namespace strider {
 	// contain the compressed stream even if it expands.
 	size_t strider_compress_bound(const size_t size);
 	//Returns the amount of memory the algorithm will consume on compression.
-	size_t strider_estimate_memory(const size_t size, const int level = 6, const int window = 26);
+	size_t strider_estimate_memory(const size_t size, int level = 6, int window = 26);
 }
 
 #ifdef STRIDER_IMPLEMENTATION
@@ -3272,8 +3272,8 @@ namespace strider {
 			{ OPTIMAL_ULTRA,     28     ,          7          ,       1024    ,         1024      ,       4096      ,       24     },
 	};
 
-	size_t strider_compress(const uint8_t* input, const size_t size, uint8_t* output, const int level,
-		const int window, ProgressCallback* progress) {
+	size_t strider_compress(const uint8_t* input, const size_t size, uint8_t* output, int level,
+		int window, ProgressCallback* progress) {
 
 		if (level < 0)
 			level = 0;
@@ -3351,7 +3351,7 @@ namespace strider {
 		return memory;
 	}
 
-	size_t strider_estimate_memory(const size_t size, const int level, const int window) {
+	size_t strider_estimate_memory(const size_t size, int level, int window) {
 
 		if (level < 0)
 			level = 0;
