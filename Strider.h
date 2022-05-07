@@ -1,5 +1,5 @@
 /*
- * Strider Compression Algorithm v1.0.0
+ * Strider Compression Algorithm v1.0.1
  * Copyright (c) 2022 Carlos de Diego
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
@@ -41,7 +41,7 @@ namespace strider {
 	//You may also pass a pointer to an object with base class ProgressCallback, to track progress.
 	//Returns 0 on success or -1 on failure or corrupted data.
 	int strider_decompress(const uint8_t* compressed, const size_t compressedSize, uint8_t* decompressed,
-		const size_t uncompressedSize, ProgressCallback* progress = nullptr);
+		const size_t decompressedSize, ProgressCallback* progress = nullptr);
 
 	//For a given input size, returns a size for the output buffer that is big enough to
 	// contain the compressed stream even if it expands.
@@ -54,11 +54,8 @@ namespace strider {
 
 #include <algorithm>
 #include <cstring>
-#include <cmath>
 
 using namespace std;
-
-namespace strider {
 
 #if defined(_MSC_VER)
 #define FORCE_INLINE __forceinline
@@ -96,10 +93,14 @@ namespace strider {
 #endif
 #endif
 
-	const union { uint16_t u; uint8_t c[2]; } LITTLE_ENDIAN_CHECK = { 1 };
-#define IS_LITTLE_ENDIAN LITTLE_ENDIAN_CHECK.c[0]
-
 #define MIN3(a, b, c) (std::min(a, std::min(b, c)))
+
+namespace strider {
+
+	bool is_little_endian() {
+		const union { uint16_t u; uint8_t c[2]; } LITTLE_ENDIAN_CHECK = { 1 };
+		return LITTLE_ENDIAN_CHECK.c[0];
+	}
 
 #if IS_64BIT
 
@@ -145,7 +146,7 @@ namespace strider {
 	}
 
 	//Undefined behaviour when value == 0
-	FORCE_INLINE uint64_t unsafeBitScanForward(const uint64_t value) {
+	FORCE_INLINE uint64_t unsafe_bit_scan_forward(const uint64_t value) {
 #if defined(_MSC_VER)
 		unsigned long result;
 		_BitScanForward64(&result, value);
@@ -168,13 +169,13 @@ namespace strider {
 	}
 
 	//Returns the index of the first set bit, starting from the least significant, or 0 if the input is null
-	FORCE_INLINE uint64_t bitScanForward(const uint64_t value) {
+	FORCE_INLINE uint64_t bit_scan_forward(const uint64_t value) {
 #if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
 		if (likely(value != 0))
-			return unsafeBitScanForward(value);
+			return unsafe_bit_scan_forward(value);
 		return 0;
 #endif  //Fallback already returns 0 when value == 0
-		return unsafeBitScanForward(value);
+		return unsafe_bit_scan_forward(value);
 	}
 
 	struct FastIntHash {
@@ -186,38 +187,38 @@ namespace strider {
 
 	//These functions are used to obtain the data for the hash. If the number of bytes is higher than the word size,
 	//they will be mixed. Also note that these might read more bytes than necessary.
-	FORCE_INLINE uint64_t readHash8(const uint8_t* const ptr) {
+	FORCE_INLINE uint64_t read_hash8(const uint8_t* const ptr) {
 		uint64_t value;
 		memcpy(&value, ptr, 8);
 		return value;
 	}
-	FORCE_INLINE uint64_t readHash4(const uint8_t* const ptr) {
+	FORCE_INLINE uint64_t read_hash4(const uint8_t* const ptr) {
 		uint32_t value;
 		memcpy(&value, ptr, 4);
 		return value;
 	}
-	FORCE_INLINE uint64_t readHash2(const uint8_t* const ptr) {
+	FORCE_INLINE uint64_t read_hash2(const uint8_t* const ptr) {
 		uint16_t value;
 		memcpy(&value, ptr, 2);
 		return value;
 	}
-	FORCE_INLINE uint64_t readHash12(const uint8_t* const ptr) {
-		return readHash8(ptr) ^ readHash4(ptr + 8);
+	FORCE_INLINE uint64_t read_hash12(const uint8_t* const ptr) {
+		return read_hash8(ptr) ^ read_hash4(ptr + 8);
 	}
-	FORCE_INLINE uint64_t readHash6(const uint8_t* const ptr) {
-		if (IS_LITTLE_ENDIAN)
-			return readHash8(ptr) << 16;
-		return readHash8(ptr) >> 16;  //Assumes big endian
+	FORCE_INLINE uint64_t read_hash6(const uint8_t* const ptr) {
+		if (is_little_endian())
+			return read_hash8(ptr) << 16;
+		return read_hash8(ptr) >> 16;  //Assumes big endian
 	}
-	FORCE_INLINE uint64_t readHash5(const uint8_t* const ptr) {
-		if (IS_LITTLE_ENDIAN)
-			return readHash8(ptr) << 24;
-		return readHash8(ptr) >> 24;  //Assumes big endian
+	FORCE_INLINE uint64_t read_hash5(const uint8_t* const ptr) {
+		if (is_little_endian())
+			return read_hash8(ptr) << 24;
+		return read_hash8(ptr) >> 24;  //Assumes big endian
 	}
-	FORCE_INLINE uint64_t readHash3(const uint8_t* const ptr) {
-		if (IS_LITTLE_ENDIAN)
-			return readHash4(ptr) << 40;
-		return readHash4(ptr) >> 8;  //Assumes big endian
+	FORCE_INLINE uint64_t read_hash3(const uint8_t* const ptr) {
+		if (is_little_endian())
+			return read_hash4(ptr) << 40;
+		return read_hash4(ptr) >> 8;  //Assumes big endian
 	}
 
 #else  //32 bit functions
@@ -255,7 +256,7 @@ namespace strider {
 		return unsafe_int_log2(value);
 	}
 
-	FORCE_INLINE uint32_t unsafeBitScanForward(uint32_t value) {
+	FORCE_INLINE uint32_t unsafe_bit_scan_forward(uint32_t value) {
 #if defined(_MSC_VER)
 		unsigned long result;
 		_BitScanForward(&result, value);
@@ -273,13 +274,13 @@ namespace strider {
 #endif
 	}
 
-	FORCE_INLINE uint32_t bitScanForward(uint32_t value) {
+	FORCE_INLINE uint32_t bit_scan_forward(uint32_t value) {
 #if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
 		if (likely(value != 0))
-			return unsafeBitScanForward(value);
+			return unsafe_bit_scan_forward(value);
 		return 0;
 #endif
-		return unsafeBitScanForward(value);
+		return unsafe_bit_scan_forward(value);
 	}
 
 	struct FastIntHash {
@@ -288,40 +289,40 @@ namespace strider {
 		}
 	};
 
-	FORCE_INLINE uint32_t readHash4(const uint8_t* const ptr) {
+	FORCE_INLINE uint32_t read_hash4(const uint8_t* const ptr) {
 		uint32_t value;
 		memcpy(&value, ptr, 4);
 		return value;
 	}
-	FORCE_INLINE uint32_t readHash2(const uint8_t* const ptr) {
+	FORCE_INLINE uint32_t read_hash2(const uint8_t* const ptr) {
 		uint16_t value;
 		memcpy(&value, ptr, 2);
 		return value;
 	}
-	FORCE_INLINE uint32_t readHash12(const uint8_t* const ptr) {
-		return readHash4(ptr) ^ readHash4(ptr + 4) ^ readHash4(ptr + 8);
+	FORCE_INLINE uint32_t read_hash12(const uint8_t* const ptr) {
+		return read_hash4(ptr) ^ read_hash4(ptr + 4) ^ read_hash4(ptr + 8);
 	}
-	FORCE_INLINE uint32_t readHash8(const uint8_t* const ptr) {
-		return readHash4(ptr) ^ readHash4(ptr + 4);
+	FORCE_INLINE uint32_t read_hash8(const uint8_t* const ptr) {
+		return read_hash4(ptr) ^ read_hash4(ptr + 4);
 	}
-	FORCE_INLINE uint32_t readHash6(const uint8_t* const ptr) {
+	FORCE_INLINE uint32_t read_hash6(const uint8_t* const ptr) {
 		uint16_t a;
 		memcpy(&a, ptr + 0, 2);
-		return readHash4(ptr + 2) ^ a;
+		return read_hash4(ptr + 2) ^ a;
 	}
-	FORCE_INLINE uint32_t readHash5(const uint8_t* const ptr) {
-		return readHash4(ptr) ^ ptr[4];
+	FORCE_INLINE uint32_t read_hash5(const uint8_t* const ptr) {
+		return read_hash4(ptr) ^ ptr[4];
 	}
-	FORCE_INLINE uint32_t readHash3(const uint8_t* const ptr) {
-		if (IS_LITTLE_ENDIAN)
-			return readHash4(ptr) << 8;
-		return readHash4(ptr) >> 8;  //Assumes big endian
+	FORCE_INLINE uint32_t read_hash3(const uint8_t* const ptr) {
+		if (is_little_endian())
+			return read_hash4(ptr) << 8;
+		return read_hash4(ptr) >> 8;  //Assumes big endian
 	}
 
 #endif
 
-	FORCE_INLINE uint64_t readUint64LE(const uint8_t* const ptr) {
-		if (IS_LITTLE_ENDIAN) {
+	FORCE_INLINE uint64_t read_uint64le(const uint8_t* const ptr) {
+		if (is_little_endian()) {
 			uint64_t value;
 			memcpy(&value, ptr, 8);
 			return value;
@@ -331,16 +332,16 @@ namespace strider {
 			value |= (uint64_t)ptr[i] << i * 8;
 		return value;
 	}
-	FORCE_INLINE void writeUint64LE(uint8_t* const ptr, const uint64_t value) {
-		if (IS_LITTLE_ENDIAN)
+	FORCE_INLINE void write_uint64le(uint8_t* const ptr, const uint64_t value) {
+		if (is_little_endian())
 			memcpy(ptr, &value, 8);
 		else {
 			for (int i = 0; i < 8; i++)
 				ptr[i] = value >> i * 8;
 		}
 	}
-	FORCE_INLINE uint32_t readUint32LE(const uint8_t* const ptr) {
-		if (IS_LITTLE_ENDIAN) {
+	FORCE_INLINE uint32_t read_uint32le(const uint8_t* const ptr) {
+		if (is_little_endian()) {
 			uint32_t value;
 			memcpy(&value, ptr, 4);
 			return value;
@@ -350,24 +351,24 @@ namespace strider {
 			value |= (uint64_t)ptr[i] << i * 8;
 		return value;
 	}
-	FORCE_INLINE void writeUint32LE(uint8_t* const ptr, const uint32_t value) {
-		if (IS_LITTLE_ENDIAN)
+	FORCE_INLINE void write_uint32le(uint8_t* const ptr, const uint32_t value) {
+		if (is_little_endian())
 			memcpy(ptr, &value, 4);
 		else {
 			for (int i = 0; i < 4; i++)
 				ptr[i] = value >> i * 8;
 		}
 	}
-	FORCE_INLINE uint16_t readUint16LE(const uint8_t* const ptr) {
+	FORCE_INLINE uint16_t read_uint16le(const uint8_t* const ptr) {
 		uint16_t value;
-		if (IS_LITTLE_ENDIAN)
+		if (is_little_endian())
 			memcpy(&value, ptr, 2);
 		else
 			value = ptr[0] | (ptr[1] << 8);
 		return value;
 	}
-	FORCE_INLINE void writeUint16LE(uint8_t* const ptr, const uint16_t value) {
-		if (IS_LITTLE_ENDIAN)
+	FORCE_INLINE void write_uint16le(uint8_t* const ptr, const uint16_t value) {
+		if (is_little_endian())
 			memcpy(ptr, &value, 2);
 		else {
 			for (int i = 0; i < 2; i++)
@@ -383,18 +384,18 @@ namespace strider {
 		//Test first bytes
 		//Usually compilers will optimize std::equal as 2 comparisons for minLength 5, 6, etc
 		//We can only use one comparison to make it faster. For powers of 2, std::equal should be good
-		if (IS_64BIT && IS_LITTLE_ENDIAN) {
+		if (IS_64BIT && is_little_endian()) {
 			switch (minLength) {
 			case 6:
-				if ((readUint64LE(front) << 16) != (readUint64LE(back) << 16) || ((size_t)(front - back) >> window))
+				if ((read_uint64le(front) << 16) != (read_uint64le(back) << 16) || ((size_t)(front - back) >> window))
 					return 0;
 				break;
 			case 5:
-				if ((readUint64LE(front) << 24) != (readUint64LE(back) << 24) || ((size_t)(front - back) >> window))
+				if ((read_uint64le(front) << 24) != (read_uint64le(back) << 24) || ((size_t)(front - back) >> window))
 					return 0;
 				break;
 			case 3:
-				if ((readUint32LE(front) << 8) != (readUint32LE(back) << 8) || ((size_t)(front - back) >> window))
+				if ((read_uint32le(front) << 8) != (read_uint32le(back) << 8) || ((size_t)(front - back) >> window))
 					return 0;
 				break;
 			default:
@@ -412,7 +413,7 @@ namespace strider {
 		front += minLength;
 		back += minLength;
 
-		if (IS_64BIT && IS_LITTLE_ENDIAN) {
+		if (IS_64BIT && is_little_endian()) {
 			while (true) {
 				if (unlikely(front + 8 > limit)) {
 					if (front > limit)
@@ -427,10 +428,10 @@ namespace strider {
 
 				//Compare 8 bytes at a time using xor. It has the property of returning 0 if the two values are equal.
 				//In case they differ, we can get the first byte that differs using a bit scan.
-				const uint64_t xorVal = readUint64LE(front) ^ readUint64LE(back);
+				const uint64_t xorVal = read_uint64le(front) ^ read_uint64le(back);
 
 				if (xorVal) {
-					front += unsafeBitScanForward(xorVal) >> 3;
+					front += unsafe_bit_scan_forward(xorVal) >> 3;
 					return front - matchOrigin;
 				}
 
@@ -468,14 +469,14 @@ namespace strider {
 	};
 
 	template<class IntType>
-	struct LZ_Structure {
+	struct LZStructure {
 		IntType matchLength;
 		IntType matchDistance;
 		IntType literalRunLength;
 	};
 
 	template<class IntType>
-	struct LZ_Match {
+	struct LZMatch {
 		IntType length;
 		IntType distance;
 	};
@@ -557,12 +558,12 @@ namespace strider {
 	//Used for easier implementation
 	//Please do not use push() and next() on the same bucket
 	template<class IntType>
-	class LzCacheBucket {
+	class LZCacheBucket {
 		IntType* it;
 		IntType* last;
 	public:
-		LzCacheBucket() {}
-		LzCacheBucket(IntType* _begin, IntType* _end) {
+		LZCacheBucket() {}
+		LZCacheBucket(IntType* _begin, IntType* _end) {
 			it = _begin;
 			last = _end;
 		}
@@ -593,17 +594,17 @@ namespace strider {
 
 	//This works like the basic hash table, except that it stores N positions per bucket
 	template<class IntType, class Hash>
-	class LzCacheTable {
+	class LZCacheTable {
 		IntType* arr = nullptr;
 		size_t hashShift;
 		size_t elementsPerBucket;  //log2
 	public:
 		//Use 2^x sizes to avoid the use of modulo and multiplication
-		LzCacheTable() {}
-		LzCacheTable(const size_t logSize, const size_t numElements) {
+		LZCacheTable() {}
+		LZCacheTable(const size_t logSize, const size_t numElements) {
 			init(logSize, numElements);
 		}
-		~LzCacheTable() {
+		~LZCacheTable() {
 			delete[] arr;
 		}
 		void init(const size_t logSize, const size_t numElements) {
@@ -611,10 +612,10 @@ namespace strider {
 			hashShift = (IS_64BIT ? 64 : 32) - logSize;
 			elementsPerBucket = numElements;
 		}
-		LzCacheBucket<IntType> operator[](size_t value) {
+		LZCacheBucket<IntType> operator[](size_t value) {
 			value = Hash{}(value) >> hashShift;
 			IntType* bucket = arr + (value << elementsPerBucket);
-			return LzCacheBucket<IntType>(bucket, bucket + ((size_t)1 << elementsPerBucket));
+			return LZCacheBucket<IntType>(bucket, bucket + ((size_t)1 << elementsPerBucket));
 		}
 	};
 
@@ -622,8 +623,8 @@ namespace strider {
 	template<class IntType>
 	class HashTableMatchFinder {
 		HashTable<IntType, FastIntHash> lzdict3;
-		LzCacheTable<IntType, FastIntHash> lzdict4;
-		LzCacheTable<IntType, FastIntHash> lzdict8;
+		LZCacheTable<IntType, FastIntHash> lzdict4;
+		LZCacheTable<IntType, FastIntHash> lzdict8;
 
 	public:
 		void init(const size_t size, const CompressorOptions compressorOptions, const int window) {
@@ -633,12 +634,12 @@ namespace strider {
 			lzdict8.init(log2size, compressorOptions.maxElementsPerHash);
 		}
 
-		LZ_Match<IntType>* find_matches_and_update(const uint8_t* const input, const uint8_t* const inputStart, const uint8_t* const limit,
-			LZ_Match<IntType>* matches, size_t highestLength, const CompressorOptions compressorOptions, const int window) {
+		LZMatch<IntType>* find_matches_and_update(const uint8_t* const input, const uint8_t* const inputStart, const uint8_t* const limit,
+			LZMatch<IntType>* matches, size_t highestLength, const CompressorOptions compressorOptions, const int window) {
 
-			IntType& chain3 = lzdict3[readHash3(input)];
-			LzCacheBucket<IntType> chain4 = lzdict4[readHash4(input)];
-			LzCacheBucket<IntType> chain8 = lzdict8[readHash8(input)];
+			IntType& chain3 = lzdict3[read_hash3(input)];
+			LZCacheBucket<IntType> chain4 = lzdict4[read_hash4(input)];
+			LZCacheBucket<IntType> chain8 = lzdict8[read_hash8(input)];
 
 			if (highestLength < 3) {
 				const uint8_t* where = inputStart + chain3;
@@ -726,9 +727,9 @@ namespace strider {
 
 		void update_position(const uint8_t* const input, const uint8_t* const inputStart) {
 			const size_t pos = input - inputStart;
-			lzdict3[readHash3(input)] = pos;
-			lzdict4[readHash4(input)].push(pos);
-			lzdict8[readHash8(input)].push(pos);
+			lzdict3[read_hash3(input)] = pos;
+			lzdict4[read_hash4(input)].push(pos);
+			lzdict8[read_hash8(input)].push(pos);
 		}
 	};
 
@@ -746,7 +747,7 @@ namespace strider {
 		HashTable<IntType, FastIntHash> nodeLookup;
 		HashTable<IntType, FastIntHash> lzdict2;
 		HashTable<IntType, FastIntHash> lzdict3;
-		LzCacheTable<IntType, FastIntHash> lzdict12;
+		LZCacheTable<IntType, FastIntHash> lzdict12;
 
 		~BinaryMatchFinder() {
 			delete[] nodes;
@@ -770,13 +771,13 @@ namespace strider {
 				lzdict12.init(std::max(4, (int)int_log2(totalWindowSize - nodeListSize) - 4), compressorOptions.maxElementsPerHash - 4);
 		}
 
-		LZ_Match<IntType>* find_matches_and_update(const uint8_t* const input, const uint8_t* const inputStart, const uint8_t* const compressionLimit, 
-			const uint8_t* const blockLimit, LZ_Match<IntType>* matches, size_t highestLength, const CompressorOptions compressorOptions, const int window) {
+		LZMatch<IntType>* find_matches_and_update(const uint8_t* const input, const uint8_t* const inputStart, const uint8_t* const compressionLimit, 
+			const uint8_t* const blockLimit, LZMatch<IntType>* matches, size_t highestLength, const CompressorOptions compressorOptions, const int window) {
 
 			const size_t inputPosition = input - inputStart;
 
 			// First try to get a length 2 match
-			IntType& chain2 = lzdict2[readHash2(input)];
+			IntType& chain2 = lzdict2[read_hash2(input)];
 			const uint8_t* where = inputStart + chain2;
 			size_t length = test_match(input, where, blockLimit, 2, window);
 
@@ -794,7 +795,7 @@ namespace strider {
 			chain2 = inputPosition;
 
 			// Then maybe a length 3
-			IntType& chain3 = lzdict3[readHash3(input)];
+			IntType& chain3 = lzdict3[read_hash3(input)];
 			where = inputStart + chain3;
 			length = test_match(input, where, blockLimit, 3, window);
 
@@ -814,7 +815,7 @@ namespace strider {
 			//If we reach this position on the back stop the search
 			const size_t btEnd = inputPosition < nodeListSize ? 0 : inputPosition - nodeListSize;
 
-			IntType& lookupEntry = nodeLookup[readHash4(input)];
+			IntType& lookupEntry = nodeLookup[read_hash4(input)];
 			size_t backPosition = lookupEntry;
 			lookupEntry = inputPosition;
 
@@ -856,7 +857,7 @@ namespace strider {
 					*lesserNode = nextNode[0];
 					*greaterNode = nextNode[1];
 					if (inputPosition > nodeListSize && ((size_t)1 << window) > nodeListSize)
-						lzdict12[readHash12(input - nodeListSize)].push(inputPosition - nodeListSize);
+						lzdict12[read_hash12(input - nodeListSize)].push(inputPosition - nodeListSize);
 					return matches;
 				}
 
@@ -876,7 +877,7 @@ namespace strider {
 
 			if (inputPosition > nodeListSize && ((size_t)1 << window) > nodeListSize) {
 
-				LzCacheBucket<IntType> cacheBucket = lzdict12[readHash12(input)];
+				LZCacheBucket<IntType> cacheBucket = lzdict12[read_hash12(input)];
 
 				while (!cacheBucket.ended()) {
 					const IntType pos = cacheBucket.next();
@@ -898,7 +899,7 @@ namespace strider {
 					}
 				}
 
-				lzdict12[readHash12(input - nodeListSize)].push(inputPosition - nodeListSize);
+				lzdict12[read_hash12(input - nodeListSize)].push(inputPosition - nodeListSize);
 			}
 
 			return matches;
@@ -908,16 +909,16 @@ namespace strider {
 			const CompressorOptions& compressorOptions, const int window) {
 
 			const size_t inputPosition = input - inputStart;
-			lzdict2[readHash2(input)] = inputPosition;
-			lzdict3[readHash3(input)] = inputPosition;
+			lzdict2[read_hash2(input)] = inputPosition;
+			lzdict3[read_hash3(input)] = inputPosition;
 			if (inputPosition > nodeListSize && ((size_t)1 << window) > nodeListSize)
-				lzdict12[readHash12(input - nodeListSize)].push(inputPosition - nodeListSize);
+				lzdict12[read_hash12(input - nodeListSize)].push(inputPosition - nodeListSize);
 
 			//If we reach this position on the front stop the update
 			const uint8_t* positionSkip = std::min(compressionLimit, input + compressorOptions.standardNiceLength);
 			//If we reach this position on the back stop the update
 			const size_t btEnd = inputPosition < nodeListSize ? 0 : inputPosition - nodeListSize;
-			IntType& lookupEntry = nodeLookup[readHash4(input)];
+			IntType& lookupEntry = nodeLookup[read_hash4(input)];
 			size_t backPosition = lookupEntry;
 			lookupEntry = inputPosition;
 
@@ -990,11 +991,7 @@ namespace strider {
 	const int STRIDER_MAX_BLOCK_SIZE = 65536;
 	const int STRIDER_MIN_LENGTH = 2;
 	const int STRIDER_LAST_BYTES = 31;
-	const int STRIDER_COST_PRECISION = 512;
-
-	const int STRIDER_RAW_FLAG = 0;
-	const int HIGH_ENTROPY = 255;
-	const int UNCOMPRESSED_LITERALS = 9;
+	const int STRIDER_COST_PRECISION = 16;
 
 	const uint16_t NIBBLE_INITIAL[16] = {
 		0, MODEL_SCALE / 16, 2 * MODEL_SCALE / 16, 3 * MODEL_SCALE / 16,
@@ -1112,7 +1109,7 @@ namespace strider {
 			__m128i tmp0 = _mm_cmpgt_epi16(sse[0], cmp);
 			__m128i tmp1 = _mm_cmpgt_epi16(sse[1], cmp);
 			const size_t mask = _mm_movemask_epi8(_mm_packs_epi16(tmp0, tmp1)) | 0x10000;
-			size_t symbol = bitScanForward(mask) - 1;
+			size_t symbol = bit_scan_forward(mask) - 1;
 #else
 			size_t symbol = 8 * (value >= scalar[8]);
 			symbol += 4 * (value >= scalar[4 + symbol]);
@@ -1127,7 +1124,6 @@ namespace strider {
 	const uint32_t RANS_BIT_PRECISION = 31;
 	const uint32_t RANS_NORMALIZATION_INTERVAL = 1 << (RANS_BIT_PRECISION - 16);
 
-	//64 bit dual state rans encoder
 	class RansEncoder {
 
 		uint8_t* streamBegin;
@@ -1183,14 +1179,14 @@ namespace strider {
 		FORCE_INLINE void encode_raw_bits(size_t symbol, size_t nBits) {
 
 			while (nBits > 15) {
-				*symbolBufferIt++ = 0x80000000 | (15 << 15) | ((symbol >> nBits - 15) & 0x7FFF);
+				*symbolBufferIt++ = 0x80000000 | (15 << 15) | ((symbol >> (nBits - 15)) & 0x7FFF);
 				nBits -= 15;
 			}
 			*symbolBufferIt++ = 0x80000000 | (nBits << 15) | (symbol & (1 << nBits) - 1);
 		}
 		FORCE_INLINE void normalize(const size_t interval) {
 			const bool renormalize = stateB >= interval;
-			writeUint16LE(streamBufferIt - 2, stateB);
+			write_uint16le(streamBufferIt - 2, stateB);
 			streamBufferIt -= renormalize * 2;
 			stateB >>= renormalize * 16;
 		}
@@ -1227,8 +1223,8 @@ namespace strider {
 			} while (symbolBufferIt != symbolBufferBegin);
 
 			streamBufferIt -= 8;
-			writeUint32LE(streamBufferIt + 0, stateB);
-			writeUint32LE(streamBufferIt + 4, stateA);
+			write_uint32le(streamBufferIt + 0, stateB);
+			write_uint32le(streamBufferIt + 4, stateA);
 
 			size_t finalBlockSize = streamBufferBegin + streamBufferSize - streamBufferIt;
 			memcpy(streamIt, streamBufferIt, finalBlockSize);
@@ -1489,11 +1485,11 @@ namespace strider {
 		}
 
 		double test_literal_size(const LiteralData* literalBuffer, const size_t literalCount, nibble_model* literalModel,
-			uint8_t literalContextBitShift, uint8_t positionContextBitMask, const uint16_t* freqCostTable) {
+			uint8_t literalContextBitShift, uint8_t positionContextBitMask, const uint8_t* freqCostTable) {
 
 			//Usually bad
 			if ((8 - literalContextBitShift) + int_log2(positionContextBitMask + 1) > 8)
-				return INFINITY;
+				return 1e300;
 
 			size_t compressedSize = 0;
 
@@ -1520,7 +1516,7 @@ namespace strider {
 		}
 
 		template<class IntType>
-		int calculate_lc(const uint8_t* input, const size_t size, const uint16_t* freqCostTable) {
+		int calculate_lc(const uint8_t* input, const size_t size, const uint8_t* freqCostTable) {
 
 			HashTable<IntType, FastIntHash> lzdict;
 			lzdict.init(std::min(int_log2(size) - 3, (size_t)18));
@@ -1550,7 +1546,7 @@ namespace strider {
 
 				for (; input < matchLimit; ) {
 
-					IntType* dictEntry = &lzdict[readHash4(input)];
+					IntType* dictEntry = &lzdict[read_hash4(input)];
 					const size_t matchLength = test_match(input, inputStart + *dictEntry, matchLimit, 4, 31);
 
 					//We have found a match
@@ -1559,11 +1555,11 @@ namespace strider {
 						*dictEntry = input - inputStart;
 						const uint8_t* const matchEnd = input + matchLength;
 						for (input++; input < matchEnd; input++)
-							lzdict[readHash4(input)] = input - inputStart;
+							lzdict[read_hash4(input)] = input - inputStart;
 					}
 					else {
 						*dictEntry = input - inputStart;
-						LiteralData literalData = { *input, reinterpret_cast<size_t>(input) & positionContextBitMask, input[-1], *(input - lastDistance) };
+						LiteralData literalData = { *input, (uint8_t)(reinterpret_cast<size_t>(input) & positionContextBitMask), input[-1], *(input - lastDistance) };
 						literalBuffer[literalCount] = literalData;
 						literalCount++;
 						input++;
@@ -1618,13 +1614,13 @@ namespace strider {
 		for (size_t i = 0; i < 8; i++) { repOffsets[i] = 1; }
 		for (size_t i = 0; i < 24; i++) { distanceModel[i].init(); }
 		distanceLow->init();
-		for (size_t i = 0; i < 291; i++) { matchLengthHigh[i].init(); }
+		for (size_t i = 0; i < 162; i++) { matchLengthHigh[i].init(); }
 	}
 
 	void store_block_header(size_t blockSize, uint8_t positionContextBitMask, uint8_t literalContextBitShift,
 		bool resetModels, bool uncompressedBlock, uint8_t*& output)
 	{
-		writeUint16LE(output, blockSize - 1);
+		write_uint16le(output, blockSize - 1);
 		uint8_t metadata = uncompressedBlock | (resetModels << 1);
 		metadata |= (int_log2(positionContextBitMask + 1) * 9 + literalContextBitShift) << 2;
 		output[2] = metadata;
@@ -1707,7 +1703,7 @@ namespace strider {
 			else {
 				size_t logarithm = int_log2(distance);
 				size_t rawBits = logarithm - 5;
-				size_t symbol = logarithm * 2 + ((distance >> logarithm - 1) & 1);
+				size_t symbol = logarithm * 2 + ((distance >> (logarithm - 1)) & 1);
 				size_t symbolHigh = symbol >> 4;
 				encoder.encode_nibble(8 | symbolHigh, &distanceModel[*matchLiteralContext]);
 				size_t symbolLow = symbol & 0xF;
@@ -1720,25 +1716,23 @@ namespace strider {
 			*matchLiteralContext = (*matchLiteralContext >> 2) | 8;
 		}
 
-		const size_t shortLengthContext = matchLengthContext * 16 | positionContext;
-
 		if (matchLength > 16) {
-			encoder.encode_nibble(15, &matchLengthHigh[shortLengthContext]);
+			encoder.encode_nibble(15, &matchLengthHigh[matchLengthContext * 16 | positionContext]);
 			if (matchLength > 31) {
-				encoder.encode_nibble(15, &matchLengthHigh[144 + shortLengthContext]);
+				encoder.encode_nibble(15, &matchLengthHigh[144 + matchLengthContext]);
 				matchLength -= 31;
 				size_t symbol = int_log2(matchLength);
-				encoder.encode_nibble(symbol, &matchLengthHigh[288 + std::min(matchLengthContext, (size_t)2)]);
+				encoder.encode_nibble(symbol, &matchLengthHigh[153 + matchLengthContext]);
 				encoder.encode_raw_bits(matchLength & ((size_t)1 << symbol) - 1, symbol);
 			}
 			else {
 				matchLength -= 17;
-				encoder.encode_nibble(matchLength, &matchLengthHigh[144 + shortLengthContext]);
+				encoder.encode_nibble(matchLength, &matchLengthHigh[144 + matchLengthContext]);
 			}
 		}
 		else {
 			matchLength -= STRIDER_MIN_LENGTH;
-			encoder.encode_nibble(matchLength, &matchLengthHigh[shortLengthContext]);
+			encoder.encode_nibble(matchLength, &matchLengthHigh[matchLengthContext * 16 | positionContext]);
 		}
 	}
 
@@ -1838,7 +1832,7 @@ namespace strider {
 
 			for (; input < thisBlockEnd; ) {
 
-				IntType* const dictEntry = &lzdict[readHash6(input)];
+				IntType* const dictEntry = &lzdict[read_hash6(input)];
 				const uint8_t* match = inputStart + *dictEntry;
 				size_t matchLength = test_match(input, match, thisBlockEnd, 6, window);
 
@@ -1856,7 +1850,7 @@ namespace strider {
 					const uint8_t* const matchEnd = input + matchLength;
 					input = distance < matchLength ? matchEnd - distance : input;
 					for (; input < matchEnd; input++)
-						lzdict[readHash6(input)] = input - inputStart;
+						lzdict[read_hash6(input)] = input - inputStart;
 
 					literalRunStart = input;
 					//Output the match
@@ -1918,7 +1912,7 @@ namespace strider {
 		}
 
 		*testedPositions = 1;
-		LZ2WayCacheBucket<IntType> dictEntry = lzdict[readHash6(input)];
+		LZ2WayCacheBucket<IntType> dictEntry = lzdict[read_hash6(input)];
 
 		//Test first entry
 		size_t pos = input - inputStart;
@@ -1961,7 +1955,7 @@ namespace strider {
 		input++;
 		*lazySteps = 0;
 		*testedPositions = 2;
-		dictEntry = lzdict[readHash6(input)];
+		dictEntry = lzdict[read_hash6(input)];
 
 		//Test first entry
 		pos = input - inputStart;
@@ -1996,7 +1990,7 @@ namespace strider {
 	//Same principle as the last function, but with additional heuristics to improve ratio
 	template<class IntType>
 	FORCE_INLINE void strider_lazy_search(const uint8_t* input, const uint8_t* const inputStart, const uint8_t* const limit,
-		LzCacheTable<IntType, FastIntHash>& lzdict4, LzCacheTable<IntType, FastIntHash>& lzdict8, size_t* bestLength,
+		LZCacheTable<IntType, FastIntHash>& lzdict4, LZCacheTable<IntType, FastIntHash>& lzdict8, size_t* bestLength,
 		size_t* bestDistance, const size_t repOffset, int* lazySteps, int* testedPositions,
 		const CompressorOptions compressorOptions, const int window) {
 
@@ -2009,8 +2003,8 @@ namespace strider {
 			return;
 		}
 
-		LzCacheBucket<IntType> chain4 = lzdict4[readHash4(input)];
-		LzCacheBucket<IntType> chain8 = lzdict8[readHash8(input)];
+		LZCacheBucket<IntType> chain4 = lzdict4[read_hash4(input)];
+		LZCacheBucket<IntType> chain8 = lzdict8[read_hash8(input)];
 		size_t pos = input - inputStart;
 		*testedPositions = 1;
 		*lazySteps = 0;
@@ -2089,8 +2083,8 @@ namespace strider {
 		//Now try to get a better match at pos + 1
 		input++;
 		pos = input - inputStart;
-		lzdict4[readHash4(input)].push(pos);  //We wont search for length < 8
-		chain8 = lzdict8[readHash8(input)];
+		lzdict4[read_hash4(input)].push(pos);  //We wont search for length < 8
+		chain8 = lzdict8[read_hash8(input)];
 		*testedPositions = 2;
 
 		//Only try to find matches of length at least 8 at pos + 1
@@ -2157,8 +2151,8 @@ namespace strider {
 
 		const size_t hashSize = MIN3((int)int_log2(size) - 3, compressorOptions.maxHashTableSize, window - 3);
 		LZ2WayCacheTable<IntType, FastIntHash> way2lzdict;
-		LzCacheTable<IntType, FastIntHash> lzdict4;
-		LzCacheTable<IntType, FastIntHash> lzdict8;
+		LZCacheTable<IntType, FastIntHash> lzdict4;
+		LZCacheTable<IntType, FastIntHash> lzdict8;
 		try {
 			if (compressorOptions.parserFunction == LAZY_NORMAL) {
 				way2lzdict.init(hashSize);
@@ -2255,12 +2249,12 @@ namespace strider {
 					input = distance < matchLength ? matchEnd - distance : input + testedPositions - lazySteps;
 					if (compressorOptions.parserFunction == LAZY_NORMAL) {
 						for (; input < matchEnd; input++)
-							way2lzdict[readHash6(input)].push_in_first(input - inputStart);
+							way2lzdict[read_hash6(input)].push_in_first(input - inputStart);
 					}
 					else {
 						for (; input < matchEnd; input++) {
-							lzdict4[readHash4(input)].push(input - inputStart);
-							lzdict8[readHash8(input)].push(input - inputStart);
+							lzdict4[read_hash4(input)].push(input - inputStart);
+							lzdict8[read_hash8(input)].push(input - inputStart);
 						}
 					}
 
@@ -2313,8 +2307,8 @@ namespace strider {
 	};
 
 	template<class IntType>
-	LZ_Structure<IntType>* strider_forward_optimal_parse(const uint8_t* const input, const uint8_t* const inputStart, const uint8_t* const blockLimit,
-		HashTableMatchFinder<IntType>& matchFinder, StriderFastOptimalState<IntType>* parser, LZ_Structure<IntType>* stream,
+	LZStructure<IntType>* strider_forward_optimal_parse(const uint8_t* const input, const uint8_t* const inputStart, const uint8_t* const blockLimit,
+		HashTableMatchFinder<IntType>& matchFinder, StriderFastOptimalState<IntType>* parser, LZStructure<IntType>* stream,
 		size_t* repOffsets, const CompressorOptions compressorOptions, const int window) {
 
 		const size_t blockLength = std::min((size_t)(blockLimit - input), (size_t)compressorOptions.optimalBlockSize);
@@ -2379,14 +2373,14 @@ namespace strider {
 				}
 			}
 
-			LZ_Match<IntType> matches[32];
-			const LZ_Match<IntType>* matchesEnd = matchFinder.find_matches_and_update(inputPosition, inputStart, 
+			LZMatch<IntType> matches[32];
+			const LZMatch<IntType>* matchesEnd = matchFinder.find_matches_and_update(inputPosition, inputStart, 
 				blockLimit, matches, highestLength, compressorOptions, window);
 
 			//At least one match was found
 			if (matchesEnd != matches) {
 				//The last match should be the longest
-				const LZ_Match<IntType>* const longestMatch = matchesEnd - 1;
+				const LZMatch<IntType>* const longestMatch = matchesEnd - 1;
 				//Match goes outside the buffer or is very long
 				if (position + longestMatch->length >= blockLength || longestMatch->length >= compressorOptions.standardNiceLength) {
 					lastMatchLength = longestMatch->length;
@@ -2395,7 +2389,7 @@ namespace strider {
 					break;
 				}
 
-				for (const LZ_Match<IntType>* matchIt = matches; matchIt != matchesEnd; matchIt++) {
+				for (const LZMatch<IntType>* matchIt = matches; matchIt != matchesEnd; matchIt++) {
 
 					const size_t matchSizeCost = parserPosition->sizeCost + 12 + int_log2((size_t)matchIt->distance - 1);
 
@@ -2467,17 +2461,17 @@ namespace strider {
 	template<class IntType>
 	struct StriderOptimalParserState {
 		uint32_t sizeCost;
-		uint32_t matchLength;
+		uint16_t matchLength;
+		uint16_t literalRunLength;
+		uint16_t currentLiteralRunLengthCost;  //Cache so it does not get computed twice
+		uint8_t matchLiteralContext;
+		uint8_t prevPath;
 		IntType distance;           //Also used as last distance
-		uint32_t literalRunLength;
-		uint32_t currentLiteralRunLengthCost;  //Cache so it does not get computed twice
-		uint32_t matchLiteralContext;
-		uint32_t prevPath;
 		IntType repOffsets[8];
 	};
 
 	FORCE_INLINE size_t get_literal_run_cost(size_t literalRunLength, const size_t positionContext, const size_t matchLiteralContext,
-		nibble_model* literalRunLengthHigh, const uint16_t* freqCostTable) {
+		nibble_model* literalRunLengthHigh, const uint8_t* freqCostTable) {
 
 		if (literalRunLength >= 15) {
 			literalRunLength -= 14;  
@@ -2490,32 +2484,30 @@ namespace strider {
 	}
 
 	FORCE_INLINE size_t get_match_length_cost(size_t length, const size_t positionContext, const size_t matchLengthContext,
-		nibble_model* matchLengthHigh, const uint16_t* freqCostTable) {
-
-		const size_t shortLengthContext = matchLengthContext * 16 | positionContext;
+		nibble_model* matchLengthHigh, const uint8_t* freqCostTable) {
 
 		if (length > 16) {
-			size_t cost = freqCostTable[matchLengthHigh[shortLengthContext].get_freq(15)];
+			size_t cost = freqCostTable[matchLengthHigh[matchLengthContext * 16 | positionContext].get_freq(15)];
 			if (length > 31) {
-				cost += freqCostTable[matchLengthHigh[144 + shortLengthContext].get_freq(15)];
+				cost += freqCostTable[matchLengthHigh[144 + matchLengthContext].get_freq(15)];
 				length -= 31;
 				size_t symbol = int_log2(length);
-				cost += freqCostTable[matchLengthHigh[288 + std::min(matchLengthContext, (size_t)2)].get_freq(symbol)];
+				cost += freqCostTable[matchLengthHigh[153 + matchLengthContext].get_freq(symbol)];
 				return cost + symbol * STRIDER_COST_PRECISION;  //raw bits
 			}
 			else {
 				length -= 17;
-				return cost + freqCostTable[matchLengthHigh[144 + shortLengthContext].get_freq(length)];
+				return cost + freqCostTable[matchLengthHigh[144 + matchLengthContext].get_freq(length)];
 			}
 		}
 		else {
 			length -= STRIDER_MIN_LENGTH;
-			return freqCostTable[matchLengthHigh[shortLengthContext].get_freq(length)];
+			return freqCostTable[matchLengthHigh[matchLengthContext * 16 | positionContext].get_freq(length)];
 		}
 	}
 
 	FORCE_INLINE size_t get_distance_cost(size_t distance, nibble_model* distanceModel,
-		nibble_model* distanceLow, const size_t matchLiteralContext, uint16_t* freqCostTable) {
+		nibble_model* distanceLow, const size_t matchLiteralContext, const uint8_t* freqCostTable) {
 
 		size_t cost = 0;
 
@@ -2528,7 +2520,7 @@ namespace strider {
 		else {
 			size_t logarithm = int_log2(distance);
 			size_t rawBits = logarithm - 5;
-			size_t symbol = logarithm * 2 + ((distance >> logarithm - 1) & 1);
+			size_t symbol = logarithm * 2 + ((distance >> (logarithm - 1)) & 1);
 
 			size_t symbolHigh = symbol >> 4;
 			cost += freqCostTable[distanceModel[matchLiteralContext].get_freq(8 | symbolHigh)];
@@ -2542,10 +2534,10 @@ namespace strider {
 	}
 
 	template<class IntType>
-	LZ_Structure<IntType>* strider_priced_forward_optimal_parse(const uint8_t* const input, const uint8_t* const inputStart,
+	LZStructure<IntType>* strider_priced_forward_optimal_parse(const uint8_t* const input, const uint8_t* const inputStart,
 		const uint8_t* const limit, const uint8_t* const blockLimit, BinaryMatchFinder<IntType>& matchFinder,
-		StriderOptimalParserState<IntType>* parser, LZ_Structure<IntType>* stream, const CompressorOptions compressorOptions,
-		uint16_t* freqCostTable, nibble_model* literalRunLengthHigh, size_t startingLiteralRunLength, size_t matchLiteralContext,
+		StriderOptimalParserState<IntType>* parser, LZStructure<IntType>* stream, const CompressorOptions compressorOptions,
+		const uint8_t* freqCostTable, nibble_model* literalRunLengthHigh, size_t startingLiteralRunLength, size_t matchLiteralContext,
 		nibble_model* literalModel, uint8_t literalContextBitsShift, uint8_t positionContextBitMask, size_t lastDistance,
 		size_t* repOffsets, nibble_model* distanceModel, nibble_model* distanceLow, nibble_model* matchLengthHigh, const int window) {
 
@@ -2644,14 +2636,14 @@ namespace strider {
 				}
 			}
 
-			LZ_Match<IntType> matches[144];
-			const LZ_Match<IntType>* matchesEnd = matchFinder.find_matches_and_update(inputPosition, inputStart, limit, blockLimit, matches,
+			LZMatch<IntType> matches[144];
+			const LZMatch<IntType>* matchesEnd = matchFinder.find_matches_and_update(inputPosition, inputStart, limit, blockLimit, matches,
 				highestLength, compressorOptions, window);
 
 			//At least one match was found
 			if (matchesEnd != matches) {
 				//The last match should be the longest
-				const LZ_Match<IntType>* const longestMatch = matchesEnd - 1;
+				const LZMatch<IntType>* const longestMatch = matchesEnd - 1;
 				//Match goes outside the buffer or is very long
 				if (position + longestMatch->length >= blockLength || longestMatch->length >= compressorOptions.standardNiceLength) {
 					lastMatchLength = longestMatch->length;
@@ -2663,7 +2655,7 @@ namespace strider {
 				const size_t currentMatchLiteralContext = parserPosition->matchLiteralContext >> (parserPosition->literalRunLength > 0) * 2;  //After literal run
 				const size_t nextMatchLiteralContext = (currentMatchLiteralContext >> 2) | 8;  //After match
 
-				for (const LZ_Match<IntType>* matchIt = matches; matchIt != matchesEnd; matchIt++) {
+				for (const LZMatch<IntType>* matchIt = matches; matchIt != matchesEnd; matchIt++) {
 
 					const size_t matchLengthContext = 1 + int_log2((size_t)matchIt->distance) / 8;
 					const size_t lengthCost = get_match_length_cost(matchIt->length, positionContext, matchLengthContext, matchLengthHigh, freqCostTable);
@@ -2742,10 +2734,10 @@ namespace strider {
 	}
 
 	template<class IntType>
-	LZ_Structure<IntType>* strider_multi_arrivals_parse(const uint8_t* const input, const uint8_t* const inputStart,
+	LZStructure<IntType>* strider_multi_arrivals_parse(const uint8_t* const input, const uint8_t* const inputStart,
 		const uint8_t* const limit, const uint8_t* const blockLimit, BinaryMatchFinder<IntType>& matchFinder,
-		StriderOptimalParserState<IntType>* parser, LZ_Structure<IntType>* stream, const CompressorOptions compressorOptions,
-		uint16_t* freqCostTable, nibble_model* literalRunLengthHigh, size_t startingLiteralRunLength, size_t matchLiteralContext,
+		StriderOptimalParserState<IntType>* parser, LZStructure<IntType>* stream, const CompressorOptions compressorOptions,
+		const uint8_t* freqCostTable, nibble_model* literalRunLengthHigh, size_t startingLiteralRunLength, size_t matchLiteralContext,
 		nibble_model* literalModel, size_t literalContextBitsShift, size_t positionContextBitMask, size_t lastDistance,
 		size_t* repOffsets, nibble_model* distanceModel, nibble_model* distanceLow, nibble_model* matchLengthHigh, const int window) {
 
@@ -2883,8 +2875,8 @@ namespace strider {
 				}
 			}
 
-			LZ_Match<IntType> matches[144];
-			const LZ_Match<IntType>* matchesEnd =
+			LZMatch<IntType> matches[144];
+			const LZMatch<IntType>* matchesEnd =
 				matchFinder.find_matches_and_update(inputPosition, inputStart, limit, blockLimit, matches, 1, compressorOptions, window);
 
 			//At least one match was found
@@ -2894,7 +2886,7 @@ namespace strider {
 					//Longest length can be anywhere
 					size_t longestLength = 0;
 					size_t distance;
-					for (LZ_Match<IntType>* matchIt = matches; matchIt != matchesEnd; matchIt++) {
+					for (LZMatch<IntType>* matchIt = matches; matchIt != matchesEnd; matchIt++) {
 						if (matchIt->length > longestLength) {
 							longestLength = matchIt->length;
 							distance = matchIt->distance;
@@ -2910,7 +2902,7 @@ namespace strider {
 				}
 				else {
 					//The last match should be the longest
-					const LZ_Match<IntType>* const longestMatch = matchesEnd - 1;
+					const LZMatch<IntType>* const longestMatch = matchesEnd - 1;
 					//Match goes outside the buffer or is very long
 					if (position + longestMatch->length >= blockLength || longestMatch->length >= compressorOptions.standardNiceLength) {
 						lastMatchLength = longestMatch->length;
@@ -2925,7 +2917,7 @@ namespace strider {
 				const size_t currentMatchLiteralContext = parserPosition->matchLiteralContext >> (parserPosition->literalRunLength > 0) * 2;  //After literal run
 				const size_t nextMatchLiteralContext = (currentMatchLiteralContext >> 2) | 8;  //After match
 
-				for (const LZ_Match<IntType>* matchIt = matches; matchIt != matchesEnd; matchIt++) {
+				for (const LZMatch<IntType>* matchIt = matches; matchIt != matchesEnd; matchIt++) {
 
 					if (matchIt->distance == parserPosition->repOffsets[0] || matchIt->distance == parserPosition->repOffsets[1] ||
 						matchIt->distance == parserPosition->repOffsets[2] || matchIt->distance == parserPosition->repOffsets[3] ||
@@ -3071,7 +3063,7 @@ namespace strider {
 		nibble_model* literalModel = nullptr;
 		nibble_model distanceModel[24];
 		nibble_model distanceLow;
-		nibble_model matchLengthHigh[291];
+		nibble_model matchLengthHigh[162];
 
 		uint8_t matchLiteralContext = 0;
 		uint8_t literalContextBitsShift = -1;   //The right shift on the previous byte context for literals
@@ -3080,16 +3072,17 @@ namespace strider {
 		size_t repOffsets[8] = { 1, 1, 1, 1, 1, 1, 1, 1 };
 
 		//Cost of encoding any symbol with a given frequency
-		uint16_t* freqCostTable = nullptr;
+		uint8_t* freqCostTable = nullptr;
 		if (compressorOptions.parserFunction > OPTIMAL_FAST) {
 			try {
-				freqCostTable = new uint16_t[1 << MODEL_PRECISION_BITS];
+				freqCostTable = new uint8_t[1 << MODEL_PRECISION_BITS];
 			}
 			catch (std::bad_alloc& e) {
 				return 0;
 			}
 			for (uint16_t i = 1; i < MODEL_SCALE; i++)
-				freqCostTable[i] = (MODEL_PRECISION_BITS - fast_log2((float)i)) * STRIDER_COST_PRECISION;
+				//For very high probabilities the cost can get set to 0. The +1 bias fixes this
+				freqCostTable[i] = 1 + (MODEL_PRECISION_BITS - fast_log2((float)i)) * STRIDER_COST_PRECISION;
 
 			if (dataDetector.calculate_lc<IntType>(input, size, freqCostTable)) {
 				delete[] freqCostTable;
@@ -3099,21 +3092,21 @@ namespace strider {
 
 		HashTableMatchFinder<IntType> hashMatchFinder;
 		BinaryMatchFinder<IntType> binaryMatchFinder;
-		void* parser = nullptr;
-		LZ_Structure<IntType>* stream = nullptr;
+		char* parser = nullptr;
+		LZStructure<IntType>* stream = nullptr;
 		try {
 			if (compressorOptions.parserFunction == OPTIMAL_FAST) {
 				hashMatchFinder.init(size, compressorOptions, window);
-				parser = new StriderFastOptimalState<IntType>[compressorOptions.optimalBlockSize + 1];
+				parser = (char*)(new StriderFastOptimalState<IntType>[compressorOptions.optimalBlockSize + 1]);
 			}
 			else {
 				binaryMatchFinder.init(size, compressorOptions, window);
 				if (compressorOptions.parserFunction == OPTIMAL)
-					parser = new StriderOptimalParserState<IntType>[compressorOptions.optimalBlockSize + 1];
+					parser = (char*)(new StriderOptimalParserState<IntType>[compressorOptions.optimalBlockSize + 1]);
 				else
-					parser = new StriderOptimalParserState<IntType>[(compressorOptions.optimalBlockSize + 1) * compressorOptions.maxArrivals];
+					parser = (char*)(new StriderOptimalParserState<IntType>[(compressorOptions.optimalBlockSize + 1) * compressorOptions.maxArrivals]);
 			}
-			stream = new LZ_Structure<IntType>[compressorOptions.optimalBlockSize];
+			stream = new LZStructure<IntType>[compressorOptions.optimalBlockSize];
 		}
 		catch (const std::bad_alloc& e) {
 			delete[] freqCostTable;
@@ -3155,7 +3148,7 @@ namespace strider {
 				if (positionContextBitMask != newPositionContextBitMask) {
 					for (size_t i = 0; i < 192; i++)
 						literalRunLengthHigh[i].init();
-					for (size_t i = 0; i < 288; i++)
+					for (size_t i = 0; i < 144; i++)
 						matchLengthHigh[i].init();
 				}
 				if (literalContextBitsShift != newLiteralContextBitShift || positionContextBitMask != newPositionContextBitMask) {
@@ -3175,7 +3168,7 @@ namespace strider {
 
 			for (; input < thisBlockEnd; ) {
 
-				LZ_Structure<IntType>* streamIt;
+				LZStructure<IntType>* streamIt;
 				if (compressorOptions.parserFunction == OPTIMAL_FAST) {
 					streamIt = strider_forward_optimal_parse<IntType>(input, inputStart, thisBlockEnd, hashMatchFinder,
 						(StriderFastOptimalState<IntType>*)parser, stream, repOffsets, compressorOptions, window);
@@ -3329,7 +3322,7 @@ namespace strider {
 			size_t memory = sizeof(IntType) << std::min(log2size, 14);  //hash 3 table
 			memory += sizeof(IntType) << log2size << striderCompressorLevels[level].maxElementsPerHash << 1;  //hash 4 and hash 8 tables
 			memory += sizeof(StriderFastOptimalState<IntType>) * striderCompressorLevels[level].optimalBlockSize + 1;
-			memory += sizeof(LZ_Structure<IntType>) * striderCompressorLevels[level].optimalBlockSize;
+			memory += sizeof(LZStructure<IntType>) * striderCompressorLevels[level].optimalBlockSize;
 			return memory;
 		}
 		const size_t binaryTreeSize = (size_t)1 << std::min(striderCompressorLevels[level].maxHashTableSize, window);
@@ -3346,8 +3339,8 @@ namespace strider {
 			memory += sizeof(StriderOptimalParserState<IntType>) * (striderCompressorLevels[level].optimalBlockSize + 1);
 		else
 			memory += sizeof(StriderOptimalParserState<IntType>) * (striderCompressorLevels[level].optimalBlockSize + 1) * striderCompressorLevels[level].maxArrivals;
-		memory += sizeof(LZ_Structure<IntType>) * striderCompressorLevels[level].optimalBlockSize;
-		memory += sizeof(uint16_t) * MODEL_SCALE; //cost table
+		memory += sizeof(LZStructure<IntType>) * striderCompressorLevels[level].optimalBlockSize;
+		memory += sizeof(uint8_t) * MODEL_SCALE; //cost table
 		return memory;
 	}
 
@@ -3394,14 +3387,14 @@ namespace strider {
 			compressedStreamIt = compressed;
 			compressedStreamEnd = compressedEnd;
 
-			stateA = readUint32LE(compressedStreamIt + 0);
-			stateB = readUint32LE(compressedStreamIt + 4);
+			stateA = read_uint32le(compressedStreamIt + 0);
+			stateB = read_uint32le(compressedStreamIt + 4);
 			compressedStreamIt += 8;
 		}
 		FORCE_INLINE void normalize() {
 			const size_t renormalize = stateB < RANS_NORMALIZATION_INTERVAL;
 			stateB <<= renormalize * 16;
-			stateB |= readUint16LE(compressedStreamIt) & (0 - renormalize);
+			stateB |= read_uint16le(compressedStreamIt) & (0 - renormalize);
 			compressedStreamIt += renormalize * 2;
 		}
 		FORCE_INLINE size_t decode_raw_bits(size_t nBits) {
@@ -3483,17 +3476,17 @@ namespace strider {
 	}
 
 	int strider_decompress(const uint8_t* compressed, const size_t compressedSize, uint8_t* decompressed,
-		const size_t uncompressedSize, ProgressCallback* progress) {
+		const size_t decompressedSize, ProgressCallback* progress) {
 
 		ProgressCallback defaultProgress;
 		if (!progress)
 			progress = &defaultProgress;
 
-		if (uncompressedSize <= STRIDER_LAST_BYTES + 1) {
-			if (compressedSize < uncompressedSize)
+		if (decompressedSize <= STRIDER_LAST_BYTES + 1) {
+			if (compressedSize < decompressedSize)
 				return -1;
-			memcpy(decompressed, compressed, uncompressedSize);
-			progress->progress(uncompressedSize);
+			memcpy(decompressed, compressed, decompressedSize);
+			progress->progress(decompressedSize);
 			return 0;
 		}
 
@@ -3502,7 +3495,7 @@ namespace strider {
 
 		RansDecoder ransDecoder;
 		const uint8_t* const decompressedStart = decompressed;
-		const uint8_t* const decompressedEnd = decompressed + uncompressedSize - STRIDER_LAST_BYTES;
+		const uint8_t* const decompressedEnd = decompressed + decompressedSize - STRIDER_LAST_BYTES;
 		const uint8_t* const compressedEnd = compressed + compressedSize - STRIDER_LAST_BYTES;
 		//First byte is uncompressed
 		*decompressed++ = *compressed++;
@@ -3512,7 +3505,7 @@ namespace strider {
 		nibble_model* literalModel = nullptr;  //Also indicates whether this is the first rans block
 		nibble_model distanceModel[24];
 		nibble_model distanceLow;
-		nibble_model matchLengthHigh[291];
+		nibble_model matchLengthHigh[162];
 
 		uint8_t matchLiteralContext;
 		uint8_t literalContextBitsShift = -1;   //The right shift on the previous byte context for literals
@@ -3522,7 +3515,7 @@ namespace strider {
 
 		while (decompressed < decompressedEnd) {
 
-			const size_t thisBlockSize = readUint16LE(compressed) + 1;
+			const size_t thisBlockSize = read_uint16le(compressed) + 1;
 			const uint8_t blockMetadata = compressed[2];
 			compressed += 3;
 			const uint8_t* const thisBlockEnd = decompressed + thisBlockSize;
@@ -3578,7 +3571,7 @@ namespace strider {
 					if (positionContextBitMask != newPositionContextBitMask) {
 						for (size_t i = 0; i < 192; i++)
 							literalRunLengthHigh[i].init();
-						for (size_t i = 0; i < 288; i++)
+						for (size_t i = 0; i < 144; i++)
 							matchLengthHigh[i].init();
 					}
 					if (literalContextBitsShift != newLiteralContextBitsShift || positionContextBitMask != newPositionContextBitMask) {
@@ -3702,13 +3695,12 @@ namespace strider {
 						matchLiteralContext |= 8;
 					}
 
-					const size_t shortLengthContext = matchLengthContext * 16 | positionContext;
-					size_t matchLength = ransDecoder.decode_nibble(&matchLengthHigh[shortLengthContext]);
+					size_t matchLength = ransDecoder.decode_nibble(&matchLengthHigh[matchLengthContext * 16 | positionContext]);
 
 					if (matchLength == 15) {
-						matchLength = ransDecoder.decode_nibble(&matchLengthHigh[144 + shortLengthContext]) + 17;
+						matchLength = ransDecoder.decode_nibble(&matchLengthHigh[144 + matchLengthContext]) + 17;
 						if (matchLength == 32) {
-							size_t symbol = ransDecoder.decode_nibble(&matchLengthHigh[288 + std::min(matchLengthContext, (size_t)2)]);
+							size_t symbol = ransDecoder.decode_nibble(&matchLengthHigh[153 + matchLengthContext]);
 							matchLength = ((size_t)1 << symbol) + ransDecoder.decode_raw_bits(symbol) + 31;
 						}
 
