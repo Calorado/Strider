@@ -1,5 +1,5 @@
 /*
- * Strider Compression Algorithm v1.0.1
+ * Strider Compression Algorithm v1.0.1b
  * Copyright (c) 2022 Carlos de Diego
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
@@ -1762,7 +1762,7 @@ namespace strider {
 		nibble_model* literalModel = nullptr;
 		nibble_model distanceModel[24];
 		nibble_model distanceLow;
-		nibble_model matchLengthHigh[291];
+		nibble_model matchLengthHigh[162];
 
 		uint8_t matchLiteralContext = 0;
 		uint8_t literalContextBitsShift = -1;   //The right shift on the previous byte context for literals
@@ -1812,7 +1812,7 @@ namespace strider {
 				if (positionContextBitMask != newPositionContextBitMask) {
 					for (size_t i = 0; i < 192; i++)
 						literalRunLengthHigh[i].init();
-					for (size_t i = 0; i < 288; i++)
+					for (size_t i = 0; i < 144; i++)
 						matchLengthHigh[i].init();
 				}
 				if (literalContextBitsShift != newLiteralContextBitShift || positionContextBitMask != newPositionContextBitMask) {
@@ -2141,7 +2141,7 @@ namespace strider {
 		nibble_model* literalModel = nullptr;
 		nibble_model distanceModel[24];
 		nibble_model distanceLow;
-		nibble_model matchLengthHigh[291];
+		nibble_model matchLengthHigh[162];
 
 		uint8_t matchLiteralContext = 0;
 		uint8_t literalContextBitsShift = -1;   //The right shift on the previous byte context for literals
@@ -2199,7 +2199,7 @@ namespace strider {
 				if (positionContextBitMask != newPositionContextBitMask) {
 					for (size_t i = 0; i < 192; i++)
 						literalRunLengthHigh[i].init();
-					for (size_t i = 0; i < 288; i++)
+					for (size_t i = 0; i < 144; i++)
 						matchLengthHigh[i].init();
 				}
 				if (literalContextBitsShift != newLiteralContextBitShift || positionContextBitMask != newPositionContextBitMask) {
