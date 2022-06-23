@@ -770,7 +770,8 @@ namespace strider {
 					lzdict16.init(std::max(1, (int)int_log2(std::min(inputSize, (size_t)1 << window) - nodeListSize) - 3));
 			}
 			lzdict3.init(MIN3((int)int_log2(inputSize) - 3, 14, window - 3));
-			lzdict2.init(MIN3((int)int_log2(inputSize) - 3, 12, window - 3));
+			if (compressorOptions.parserFunction >= OPTIMAL_BRUTE)
+				lzdict2.init(MIN3((int)int_log2(inputSize) - 3, 12, window - 3));
 			nodeLookup.init(MIN3((int)int_log2(inputSize) - 3, 20, window - 3));
 		}
 
@@ -780,28 +781,30 @@ namespace strider {
 			const size_t inputPosition = input - inputStart;
 
 			// First try to get a length 2 match
-			IntType& chain2 = lzdict2[read_hash2(input)];
-			if (highestLength < 2 || compressorOptions.parserFunction == OPTIMAL_BRUTE) {
-				const uint8_t* where = inputStart + chain2;
-				const size_t length = test_match(input, where, blockLimit, 2, window);
+			if (compressorOptions.parserFunction >= OPTIMAL_BRUTE) {
+				IntType& chain2 = lzdict2[read_hash2(input)];
+				if (highestLength < 2 || compressorOptions.parserFunction == OPTIMAL_ULTRA) {
+					const uint8_t* where = inputStart + chain2;
+					const size_t length = test_match(input, where, blockLimit, 2, window);
 
-				if (length >= 2) {
-					matches->distance = input - where;
-					matches->length = length;
-					highestLength = length;
-					matches++;
+					if (length >= 2) {
+						matches->distance = input - where;
+						matches->length = length;
+						highestLength = length;
+						matches++;
 
-					if (highestLength >= compressorOptions.niceLength) {
-						update_position(input, inputStart, compressionLimit, compressorOptions, window);
-						return matches;
+						if (highestLength >= compressorOptions.niceLength) {
+							update_position(input, inputStart, compressionLimit, compressorOptions, window);
+							return matches;
+						}
 					}
 				}
+				chain2 = inputPosition;
 			}
-			chain2 = inputPosition;
 
 			// Then a length 3 match
 			IntType& chain3 = lzdict3[read_hash3(input)];
-			if (highestLength < 3 || compressorOptions.parserFunction == OPTIMAL_BRUTE) {
+			if (highestLength < 3 || compressorOptions.parserFunction == OPTIMAL_ULTRA) {
 				const uint8_t* where = inputStart + chain3;
 				const size_t length = test_match(input, where, blockLimit, 3, window);
 
@@ -853,7 +856,7 @@ namespace strider {
 				//Match cant go outside of block boundaries
 				const size_t effectiveLength = std::min(length, (size_t)(blockLimit - input));
 				IntType* const nextNode = &nodes[2 * (backPosition & nodeListMask)];
-				if (effectiveLength > highestLength || (compressorOptions.parserFunction == OPTIMAL_BRUTE && effectiveLength > 3)) {
+				if (effectiveLength > highestLength || (compressorOptions.parserFunction == OPTIMAL_ULTRA && effectiveLength > 3)) {
 					highestLength = effectiveLength;
 					matches->distance = front - back;
 					matches->length = effectiveLength;
@@ -904,7 +907,8 @@ namespace strider {
 
 			const size_t inputPosition = input - inputStart;
 			lzdict3[read_hash3(input)] = inputPosition;
-			lzdict2[read_hash2(input)] = inputPosition;
+			if (compressorOptions.parserFunction >= OPTIMAL_BRUTE) 
+				lzdict2[read_hash2(input)] = inputPosition;
 			if (inputPosition > nodeListSize && ((size_t)1 << window) > nodeListSize)
 				lzdict16[read_hash16(input - nodeListSize)] = (inputPosition - nodeListSize);
 
@@ -2591,9 +2595,16 @@ namespace strider {
 			size_t highestLength = 1;
 			size_t whichRep;
 
+			// Test all reps, but only take the longest one
 			for (size_t i = 0; i < 8; i++) {
 				size_t repMatchLength = test_match(inputPosition, inputPosition - parserPosition->repOffsets[i], blockLimit, 2, window);
 				if (repMatchLength > highestLength) {
+					if (repMatchLength >= compressorOptions.niceLength / 2 || position + repMatchLength >= blockLength) {
+						lastMatchLength = repMatchLength;
+						lastMatchDistance = parserPosition->repOffsets[i];
+						lastMatchStart = position;
+						goto doBackwardParse;
+					}
 					highestLength = repMatchLength;
 					whichRep = i;
 				}
@@ -2601,13 +2612,6 @@ namespace strider {
 
 			if (highestLength >= 2) {
 				size_t repDistance = parserPosition->repOffsets[whichRep];
-
-				if (highestLength >= compressorOptions.niceLength / 2 || position + highestLength >= blockLength) {
-					lastMatchLength = highestLength;
-					lastMatchDistance = repDistance;
-					lastMatchStart = position;
-					goto doBackwardParse;
-				}
 
 				size_t currentMatchLiteralContext = parserPosition->matchLiteralContext >> (parserPosition->literalRunLength > 0) * 2;  //After literal run
 				const size_t offsetCost = freqCostTable[distanceModel[currentMatchLiteralContext].get_freq(whichRep)];
@@ -2632,9 +2636,9 @@ namespace strider {
 				}
 			}
 
-			LZMatch<IntType> matches[144];
-			const LZMatch<IntType>* matchesEnd = matchFinder->find_matches_and_update(inputPosition, inputStart, limit, blockLimit, matches,
-				highestLength, compressorOptions, window);
+			LZMatch<IntType> matches[258];
+			const LZMatch<IntType>* matchesEnd = matchFinder->find_matches_and_update(inputPosition, inputStart, limit, 
+				blockLimit, matches, highestLength, compressorOptions, window);
 
 			//At least one match was found
 			if (matchesEnd != matches) {
@@ -2871,7 +2875,7 @@ namespace strider {
 				}
 			}
 
-			LZMatch<IntType> matches[144];
+			LZMatch<IntType> matches[258];
 			const LZMatch<IntType>* matchesEnd =
 				matchFinder->find_matches_and_update(inputPosition, inputStart, limit, blockLimit, matches, 1, compressorOptions, window);
 
@@ -2931,6 +2935,9 @@ namespace strider {
 					//Start search at the highest length. Stop when we reach the previous length or
 					// the current match length does not improve any arrival.
 					for (size_t length = matchIt->length; length > matchLengthReductionLimit; length--) {
+
+						if (position + length >= blockLength)
+							printf("caca");
 
 						const size_t lengthCost = get_match_length_cost(length, positionContext, matchLengthContext, matchLengthHigh, freqCostTable);
 						const size_t newLiteralRunPositionContext = reinterpret_cast<size_t>(inputPosition + length) & positionContextBitMask;
@@ -3258,7 +3265,7 @@ namespace strider {
 			{ OPTIMAL      ,     24     ,          6          ,      64      ,      2048      ,   NOT_USED   },
 			{ OPTIMAL_BRUTE,     24     ,          6          ,      64      ,      4096      ,       3      },
 			{ OPTIMAL_BRUTE,     26     ,          7          ,      256     ,      4096      ,       8      },
-			{ OPTIMAL_ULTRA,     30     ,          9          ,      1024    ,      4096      ,       24     },
+			{ OPTIMAL_ULTRA,     30     ,          8          ,      1024    ,      4096      ,       24     },
 	};
 
 	size_t strider_compress(const uint8_t* input, const size_t size, uint8_t* output, int level,
@@ -3323,7 +3330,8 @@ namespace strider {
 		}
 		size_t memory = sizeof(IntType) << MIN3((int)int_log2(size) - 3, 20, window - 3);  //binary node lookup
 		memory += sizeof(IntType) << MIN3((int)int_log2(size) - 3, 14, window - 3);  //hash 3 table
-		memory += sizeof(IntType) << MIN3((int)int_log2(size) - 3, 12, window - 3);  //hash 2 table
+		if (striderCompressorLevels[level].parserFunction >= OPTIMAL_BRUTE)
+			memory += sizeof(IntType) << MIN3((int)int_log2(size) - 3, 12, window - 3);  //hash 2 table
 		const size_t binaryTreeWindow = (size_t)1 << std::min(striderCompressorLevels[level].maxHashTableSize, window);
 		if (size < binaryTreeWindow)
 			memory += sizeof(IntType) * 2 * size;  //binary tree
