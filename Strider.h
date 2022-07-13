@@ -907,7 +907,7 @@ namespace strider {
 
 			const size_t inputPosition = input - inputStart;
 			lzdict3[read_hash3(input)] = inputPosition;
-			if (compressorOptions.parserFunction >= OPTIMAL_BRUTE) 
+			if (compressorOptions.parserFunction >= OPTIMAL_BRUTE)
 				lzdict2[read_hash2(input)] = inputPosition;
 			if (inputPosition > nodeListSize && ((size_t)1 << window) > nodeListSize)
 				lzdict16[read_hash16(input - nodeListSize)] = (inputPosition - nodeListSize);
@@ -1364,7 +1364,7 @@ namespace strider {
 
 		int calculate_pb(const uint8_t* data, size_t size) {
 
-			const size_t PREDICTOR_BLOCK_SIZE = 65536;
+			const size_t PREDICTOR_BLOCK_SIZE = 131072;
 			const size_t numberBlocks = size / PREDICTOR_BLOCK_SIZE + (size % PREDICTOR_BLOCK_SIZE > 0);
 
 			uint8_t* predictedBlocks = nullptr;
@@ -1383,40 +1383,35 @@ namespace strider {
 				uint8_t predictedPb = 0; //default pb = 0
 
 				//Only calculate entropy if input is big enough
-				if (size >= 196608) {
+				if (size >= 65536) {
 
-					const size_t thisBlockStart = i * PREDICTOR_BLOCK_SIZE;
-					const size_t thisBlockSize = std::min(size - thisBlockStart, PREDICTOR_BLOCK_SIZE);
+					size_t lastPb = i == 0 ? -1 : predictedBlocks[i - 1];
+					const size_t thisBlockStart = i < 2 ? 0 : (i - 2) * PREDICTOR_BLOCK_SIZE;
+					const size_t thisBlockSize = std::min(size - thisBlockStart, (i + 3) * PREDICTOR_BLOCK_SIZE - thisBlockStart);
 
 					uint32_t blockHistogram[256 * 16];
 					get_histogram16(data + thisBlockStart, thisBlockSize, blockHistogram);
-					float bestEntropy = calculate_entropy16(blockHistogram, thisBlockSize, 1);
+					float bestEntropy = calculate_entropy16(blockHistogram, thisBlockSize, 1) - (lastPb == 0) * 0.08;
 
-					float entropyPosSize2 = calculate_entropy16(blockHistogram, thisBlockSize, 2) + 0.03;
+					float entropyPosSize2 = calculate_entropy16(blockHistogram, thisBlockSize, 2) + 0.06 - (lastPb == 1) * 0.08;
 					if (entropyPosSize2 < bestEntropy) {
 						bestEntropy = entropyPosSize2;
 						predictedPb = 1;
 					}
-					if (size >= 262144) {
-						float entropyPosSize4 = calculate_entropy16(blockHistogram, thisBlockSize, 4) + 0.07;
-						if (entropyPosSize4 < bestEntropy) {
-							bestEntropy = entropyPosSize4;
-							predictedPb = 3;
-						}
+					float entropyPosSize4 = calculate_entropy16(blockHistogram, thisBlockSize, 4) + 0.15 - (lastPb == 3) * 0.08;
+					if (entropyPosSize4 < bestEntropy) {
+						bestEntropy = entropyPosSize4;
+						predictedPb = 3;
 					}
-					if (size >= 393216) {
-						float entropyPosSize8 = calculate_entropy16(blockHistogram, thisBlockSize, 8) + 0.25;
-						if (entropyPosSize8 < bestEntropy) {
-							bestEntropy = entropyPosSize8;
-							predictedPb = 7;
-						}
+					float entropyPosSize8 = calculate_entropy16(blockHistogram, thisBlockSize, 8) + 0.30 - (lastPb == 7) * 0.08;
+					if (entropyPosSize8 < bestEntropy) {
+						bestEntropy = entropyPosSize8;
+						predictedPb = 7;
 					}
-					if (size >= 720896) {
-						float entropyPosSize16 = calculate_entropy16(blockHistogram, thisBlockSize, 16) + 0.50;
-						if (entropyPosSize16 < bestEntropy) {
-							bestEntropy = entropyPosSize16;
-							predictedPb = 15;
-						}
+					float entropyPosSize16 = calculate_entropy16(blockHistogram, thisBlockSize, 16) + 0.60 - (lastPb == 15) * 0.08;
+					if (entropyPosSize16 < bestEntropy) {
+						bestEntropy = entropyPosSize16;
+						predictedPb = 15;
 					}
 				}
 
@@ -1434,50 +1429,6 @@ namespace strider {
 			}
 			dataSectors[numberSectors] = { data + size, 0, 0 };
 			currentSector = 0;
-
-			// The most problematic aspect of this method is that it tends to introduce a lot
-			// of noise in the prediction. That is, if the predicted pb is supposed to be 3,
-			// there will be blocks with pb = 1 or 7 sparsed throughout the file.
-			// This second stage will try to remove those "random" blocks
-
-			//Now remove that noise
-			for (size_t sector = 0; sector < numberSectors; ) {
-				const size_t sectorSize = dataSectors[sector + 1].start - dataSectors[sector].start;
-				DataSector sectorData = dataSectors[sector];
-				//Pb is high and the sector small, we have to fix that
-				if ((sectorData.pbMask == 0 && sectorSize < 196608) || (sectorData.pbMask == 1 && sectorSize < 262144) ||
-					(sectorData.pbMask == 3 && sectorSize < 327680) || (sectorData.pbMask == 7 && sectorSize < 458752) ||
-					(sectorData.pbMask == 15 && sectorSize < 786432)) {
-
-					//First sector
-					if (sector == 0) {
-						//Only one sector? Reduce pb
-						if (numberSectors == 1) {
-							size_t expectedMaxPb = sectorSize < 262144 ? 0 :
-								sectorSize < 327680 ? 1 :
-								sectorSize < 458752 ? 3 :
-								sectorSize < 786432 ? 7 : 15;
-							if (sectorData.pbMask > expectedMaxPb)
-								dataSectors[sector].pbMask = expectedMaxPb;
-							break;
-						}
-						else {
-							//Normally we would take the previous run, in this case take the following
-							dataSectors[0].pbMask = dataSectors[1].pbMask;
-							memmove(&dataSectors[1], &dataSectors[2], sizeof(DataSector) * numberSectors - 2);
-							numberSectors--;
-						}
-					}
-					else {
-						//Copy the pb of the previous run
-						memmove(&dataSectors[sector], &dataSectors[sector + 1], sizeof(DataSector) * numberSectors - sector - 1);
-						numberSectors--;
-					}
-				}
-				//Everything is nice
-				else
-					sector++;
-			}
 
 			delete[] predictedBlocks;
 
@@ -1613,7 +1564,7 @@ namespace strider {
 		*lastDistance = 1;
 		for (size_t i = 0; i < 8; i++) { repOffsets[i] = 1; }
 		for (size_t i = 0; i < 24; i++) { distanceModel[i].init(); }
-		distanceLow->init();
+		for (size_t i = 0; i < 2; i++) { distanceLow[i].init(); }
 		for (size_t i = 0; i < 162; i++) { matchLengthHigh[i].init(); }
 	}
 
@@ -1698,6 +1649,7 @@ namespace strider {
 				size_t symbol = distance / 16;
 				encoder->encode_nibble(8, &distanceModel[*matchLiteralContext]);
 				encoder->encode_nibble(symbol, &distanceModel[16]);
+				encoder->encode_nibble(distance & 0xF, &distanceLow[symbol != 0]);
 				matchLengthContext = 1;
 			}
 			else {
@@ -1709,10 +1661,10 @@ namespace strider {
 				size_t symbolLow = symbol & 0xF;
 				encoder->encode_nibble(symbolLow, &distanceModel[16 | symbolHigh]);
 				encoder->encode_raw_bits((distance >> 4) & (((size_t)1 << rawBits) - 1), rawBits);
+				encoder->encode_nibble(distance & 0xF, &distanceLow[1]);
 				matchLengthContext = 1 + logarithm / 8;
 			}
 
-			encoder->encode_nibble(distance & 0xF, distanceLow);
 			*matchLiteralContext = (*matchLiteralContext >> 2) | 8;
 		}
 
@@ -1741,8 +1693,8 @@ namespace strider {
 		const CompressorOptions& compressorOptions, ProgressCallback* progress, const int window) {
 
 		RansEncoder encoder;
-		encoder.initialize_rans_encoder(std::min((size_t)STRIDER_MAX_BLOCK_SIZE, size) * 1.2 + 32,
-			std::min((size_t)STRIDER_MAX_BLOCK_SIZE, size) * 2.5 + 64);
+		encoder.initialize_rans_encoder(std::min((size_t)STRIDER_MAX_BLOCK_SIZE, size) * 1.25 + 32,
+			std::min((size_t)STRIDER_MAX_BLOCK_SIZE, size) * 3.0 + 64);
 		if (size > 32768)
 			encoder.initialize_fast_rans_encoder();
 
@@ -1761,7 +1713,7 @@ namespace strider {
 		NibbleModel literalRunLengthHigh[193];
 		NibbleModel* literalModel = nullptr;
 		NibbleModel distanceModel[24];
-		NibbleModel distanceLow;
+		NibbleModel distanceLow[2];
 		NibbleModel matchLengthHigh[162];
 
 		uint8_t matchLiteralContext = 0;
@@ -1804,7 +1756,7 @@ namespace strider {
 			//We have to reset everything
 			if (doModelReset) {
 				reset_models(literalRunLengthHigh, &matchLiteralContext, literalModel, newLiteralContextBitShift,
-					newPositionContextBitMask, &distance, repOffsets, distanceModel, &distanceLow, matchLengthHigh);
+					newPositionContextBitMask, &distance, repOffsets, distanceModel, distanceLow, matchLengthHigh);
 			}
 			//Only reset certain models if needed
 			else {
@@ -1855,7 +1807,7 @@ namespace strider {
 					literalRunStart = input;
 					//Output the match
 					strider_encode_match(&encoder, input, &matchLiteralContext, positionContext, repOffsets,
-						distanceModel, &distanceLow, matchLengthHigh, matchLength, distance);
+						distanceModel, distanceLow, matchLengthHigh, matchLength, distance);
 				}
 				else {
 					*dictEntry = input - inputStart;
@@ -2120,8 +2072,8 @@ namespace strider {
 		const CompressorOptions& compressorOptions, ProgressCallback* progress, const int window) {
 
 		RansEncoder encoder;
-		encoder.initialize_rans_encoder(std::min((size_t)STRIDER_MAX_BLOCK_SIZE, size) * 1.2 + 32,
-			std::min((size_t)STRIDER_MAX_BLOCK_SIZE, size) * 2.5 + 64);
+		encoder.initialize_rans_encoder(std::min((size_t)STRIDER_MAX_BLOCK_SIZE, size) * 1.25 + 32,
+			std::min((size_t)STRIDER_MAX_BLOCK_SIZE, size) * 3.0 + 64);
 		if (size > 32768)
 			encoder.initialize_fast_rans_encoder();
 
@@ -2140,7 +2092,7 @@ namespace strider {
 		NibbleModel literalRunLengthHigh[193];
 		NibbleModel* literalModel = nullptr;
 		NibbleModel distanceModel[24];
-		NibbleModel distanceLow;
+		NibbleModel distanceLow[2];
 		NibbleModel matchLengthHigh[162];
 
 		uint8_t matchLiteralContext = 0;
@@ -2191,7 +2143,7 @@ namespace strider {
 			//We have to reset everything
 			if (doModelReset) {
 				reset_models(literalRunLengthHigh, &matchLiteralContext, literalModel, newLiteralContextBitShift,
-					newPositionContextBitMask, &distance, repOffsets, distanceModel, &distanceLow, matchLengthHigh);
+					newPositionContextBitMask, &distance, repOffsets, distanceModel, distanceLow, matchLengthHigh);
 			}
 			//Only reset certain models if needed
 			else {
@@ -2262,7 +2214,7 @@ namespace strider {
 					literalRunStart = input;
 					//Output the match
 					strider_encode_match(&encoder, input, &matchLiteralContext, positionContext, repOffsets,
-						distanceModel, &distanceLow, matchLengthHigh, matchLength, distance);
+						distanceModel, distanceLow, matchLengthHigh, matchLength, distance);
 				}
 			}
 
@@ -2516,6 +2468,7 @@ namespace strider {
 			size_t symbol = distance / 16;
 			cost += freqCostTable[distanceModel[matchLiteralContext].get_freq(8)];
 			cost += freqCostTable[distanceModel[16].get_freq(symbol)];
+			cost += freqCostTable[distanceLow[symbol != 0].get_freq(distance & 0xF)];
 		}
 		else {
 			size_t logarithm = int_log2(distance);
@@ -2526,9 +2479,9 @@ namespace strider {
 			cost += freqCostTable[distanceModel[matchLiteralContext].get_freq(8 | symbolHigh)];
 			size_t symbolLow = symbol & 0xF;
 			cost += freqCostTable[distanceModel[16 | symbolHigh].get_freq(symbolLow)];
+			cost += freqCostTable[distanceLow[1].get_freq(distance & 0xF)];
 			cost += rawBits * STRIDER_COST_PRECISION;
 		}
-		cost += freqCostTable[distanceLow->get_freq(distance & 0xF)];
 
 		return cost;
 	}
@@ -2637,7 +2590,7 @@ namespace strider {
 			}
 
 			LZMatch<IntType> matches[258];
-			const LZMatch<IntType>* matchesEnd = matchFinder->find_matches_and_update(inputPosition, inputStart, limit, 
+			const LZMatch<IntType>* matchesEnd = matchFinder->find_matches_and_update(inputPosition, inputStart, limit,
 				blockLimit, matches, highestLength, compressorOptions, window);
 
 			//At least one match was found
@@ -2936,9 +2889,6 @@ namespace strider {
 					// the current match length does not improve any arrival.
 					for (size_t length = matchIt->length; length > matchLengthReductionLimit; length--) {
 
-						if (position + length >= blockLength)
-							printf("caca");
-
 						const size_t lengthCost = get_match_length_cost(length, positionContext, matchLengthContext, matchLengthHigh, freqCostTable);
 						const size_t newLiteralRunPositionContext = reinterpret_cast<size_t>(inputPosition + length) & positionContextBitMask;
 						const size_t literalRunLengthCost = freqCostTable[literalRunLengthHigh[nextMatchLiteralContext * 16 | newLiteralRunPositionContext].get_freq(0)];
@@ -3045,8 +2995,8 @@ namespace strider {
 		const CompressorOptions& compressorOptions, ProgressCallback* progress, const int window) {
 
 		RansEncoder encoder;
-		encoder.initialize_rans_encoder(std::min((size_t)STRIDER_MAX_BLOCK_SIZE, size) * 1.2 + 32,
-			std::min((size_t)STRIDER_MAX_BLOCK_SIZE, size) * 2.5 + 64);
+		encoder.initialize_rans_encoder(std::min((size_t)STRIDER_MAX_BLOCK_SIZE, size) * 1.25 + 32,
+			std::min((size_t)STRIDER_MAX_BLOCK_SIZE, size) * 3.0 + 64);
 		if (size > 32768)
 			encoder.initialize_fast_rans_encoder();
 
@@ -3065,7 +3015,7 @@ namespace strider {
 		NibbleModel literalRunLengthHigh[193];
 		NibbleModel* literalModel = nullptr;
 		NibbleModel distanceModel[24];
-		NibbleModel distanceLow;
+		NibbleModel distanceLow[2];
 		NibbleModel matchLengthHigh[162];
 
 		uint8_t matchLiteralContext = 0;
@@ -3143,7 +3093,7 @@ namespace strider {
 			//We have to reset everything
 			if (doModelReset) {
 				reset_models(literalRunLengthHigh, &matchLiteralContext, literalModel, newLiteralContextBitShift,
-					newPositionContextBitMask, &distance, repOffsets, distanceModel, &distanceLow, matchLengthHigh);
+					newPositionContextBitMask, &distance, repOffsets, distanceModel, distanceLow, matchLengthHigh);
 			}
 			//Only reset certain models if needed
 			else {
@@ -3180,13 +3130,13 @@ namespace strider {
 					streamIt = strider_priced_forward_optimal_parse<IntType>(input, inputStart, compressionLimit, thisBlockEnd, &binaryMatchFinder,
 						(StriderOptimalParserState<IntType>*)parser, stream, compressorOptions, freqCostTable, literalRunLengthHigh, input - literalRunStart,
 						matchLiteralContext, literalModel, literalContextBitsShift, positionContextBitMask, distance, repOffsets,
-						distanceModel, &distanceLow, matchLengthHigh, window);
+						distanceModel, distanceLow, matchLengthHigh, window);
 				}
 				else {
 					streamIt = strider_multi_arrivals_parse<IntType>(input, inputStart, compressionLimit, thisBlockEnd, &binaryMatchFinder,
 						(StriderOptimalParserState<IntType>*)parser, stream, compressorOptions, freqCostTable, literalRunLengthHigh, input - literalRunStart,
 						matchLiteralContext, literalModel, literalContextBitsShift, positionContextBitMask, distance, repOffsets,
-						distanceModel, &distanceLow, matchLengthHigh, window);
+						distanceModel, distanceLow, matchLengthHigh, window);
 				}
 
 				//Main compression loop
@@ -3208,7 +3158,7 @@ namespace strider {
 					literalRunStart = input;
 					//Output the match
 					strider_encode_match(&encoder, input, &matchLiteralContext, positionContext, repOffsets,
-						distanceModel, &distanceLow, matchLengthHigh, matchLength, distance);
+						distanceModel, distanceLow, matchLengthHigh, matchLength, distance);
 
 					streamIt--;
 				}
@@ -3364,8 +3314,8 @@ namespace strider {
 			return 0;
 
 		size_t blockSize = std::min((size_t)STRIDER_MAX_BLOCK_SIZE, size);
-		size_t memory = blockSize * 1.2 + 32;   //stream buffer
-		memory += (blockSize * 2.5 + 64) * sizeof(uint32_t);  //symbol buffer
+		size_t memory = blockSize * 1.25 + 32;   //stream buffer
+		memory += (blockSize * 3.0 + 64) * sizeof(uint32_t);  //symbol buffer
 		memory += sizeof(NibbleModel) * 48 * 256;  //literal model, the encoder will not use lc + pb > 8
 		if (size > MODEL_SCALE * 3)
 			memory += sizeof(uint64_t) * MODEL_SCALE;  //fast rans encoder
@@ -3509,7 +3459,7 @@ namespace strider {
 		NibbleModel literalRunLengthHigh[193];
 		NibbleModel* literalModel = nullptr;  //Also indicates whether this is the first rans block
 		NibbleModel distanceModel[24];
-		NibbleModel distanceLow;
+		NibbleModel distanceLow[2];
 		NibbleModel matchLengthHigh[162];
 
 		uint8_t matchLiteralContext;
@@ -3568,7 +3518,7 @@ namespace strider {
 				//We have to reset everything
 				if (doModelReset) {
 					reset_models(literalRunLengthHigh, &matchLiteralContext, literalModel, newLiteralContextBitsShift,
-						newPositionContextBitMask, &distance, repOffsets, distanceModel, &distanceLow, matchLengthHigh);
+						newPositionContextBitMask, &distance, repOffsets, distanceModel, distanceLow, matchLengthHigh);
 				}
 				//Only reset certain models if needed
 				else {
@@ -3674,7 +3624,8 @@ namespace strider {
 					}
 					else {
 						if (distanceToken == 8) {
-							distance = 16 * ransDecoder.decode_nibble(&distanceModel[16]);
+							distanceToken = ransDecoder.decode_nibble(&distanceModel[16]);
+							distance = (distanceToken << 4) | ransDecoder.decode_nibble(&distanceLow[distanceToken != 0]);
 							matchLengthContext = 1;
 						}
 						else {
@@ -3683,10 +3634,9 @@ namespace strider {
 							const size_t rawBits = distanceToken / 2 - 5;
 							distance = ((size_t)2 | (distanceToken & 1)) << rawBits;
 							distance = (distance | ransDecoder.decode_raw_bits(rawBits)) << 4;
+							distance |= ransDecoder.decode_nibble(&distanceLow[1]);
 							matchLengthContext = 1 + distanceToken / 16;
 						}
-
-						distance |= ransDecoder.decode_nibble(&distanceLow);
 						distance++;
 
 						if (unlikely(decompressed - decompressedStart < distance)) {
