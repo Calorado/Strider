@@ -5,11 +5,12 @@ The algorithm was benchmarked using [lzbench](https://github.com/inikep/lzbench)
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio |
 | ---------------         | -----------| -----------| ----------- | ----- | 
 | memcpy                  | 11769 MB/s | 11526 MB/s |   211948544 |100.00 |  
-| **strider 1.0.4 -1**    |    70 MB/s |   149 MB/s |    59527061 | 28.09 |
-| **strider 1.0.4 -3**    |    16 MB/s |   157 MB/s |    56303301 | 26.56 |
-| **strider 1.0.4 -5**    |  6.35 MB/s |   167 MB/s |    53605275 | 25.29 |
-| **strider 1.0.4 -7**    |  1.98 MB/s |   165 MB/s |    49261499 | 23.24 |
-| **strider 1.0.4 -9**    |  0.96 MB/s |   161 MB/s |    47007743 | 22.18 |
+| **strider 1.1.0 -0**    |    88 MB/s |   148 MB/s |    61609295 | 29.07 |
+| **strider 1.1.0 -1**    |    70 MB/s |   154 MB/s |    59616463 | 28.13 |
+| **strider 1.1.0 -3**    |    16 MB/s |   163 MB/s |    56387479 | 26.60 |
+| **strider 1.1.0 -5**    |  6.22 MB/s |   168 MB/s |    53448711 | 25.22 |
+| **strider 1.1.0 -7**    |  2.03 MB/s |   170 MB/s |    49223009 | 23.22 | 
+| **strider 1.1.0 -9**    |  0.90 MB/s |   161 MB/s |    47000961 | 22.18 | 
 | lzma 21.03 -1           |    21 MB/s |    61 MB/s |    60694124 | 28.64 |  
 | lzma 21.03 -3           |    15 MB/s |    68 MB/s |    57809272 | 27.28 |
 | lzma 21.03 -5           |  2.76 MB/s |    77 MB/s |    49716983 | 23.46 |
