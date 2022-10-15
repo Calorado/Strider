@@ -1,5 +1,7 @@
 # Strider
-An algorithm that aims at reaching the same ratios as LZMA, but with 2.5x faster decompression. This is mainly achieved through the use of interleaved rANS and the use of a nibble based model, which can be accelerated with SIMD.
+An algorithm that aims at reaching the same ratios as LZMA, but with 2x faster decompression. This is mainly achieved through the use of interleaved rANS and the use of a nibble based model, which can be accelerated with SIMD.
+# How to use
+It's basically the same as my other compressor Skanda, you can check it here: https://github.com/Calorado/Skanda
 # Benchmark
 The algorithm was benchmarked using [lzbench](https://github.com/inikep/lzbench) on Windows 10, on an i5-6300HQ and compiled with Visual Studio 2022. The file used was produced by tarring the [Silesia corpus](http://sun.aei.polsl.pl/~sdeor/index.php?page=silesia). The only additional parameter was -t16,16.
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio |
